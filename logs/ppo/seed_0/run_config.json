@@ -1,0 +1,9 @@
+{
+  "blur": true,
+  "hist_eq": true,
+  "reward_mode": "sparse",
+  "termination_method": "pixeldiff",
+  "pixeldiff_thresh": 45000,
+  "action_sleep": 0.1,
+  "seed": 0
+}

@@ -1,0 +1,14 @@
+torch 
+torchvision 
+torchaudio
+stable-baselines3[extra]
+protobuf
+mss
+Pillow
+pydirectinput 
+pytesseract
+gymnasium
+notebook
+keyboard
+matplotlib
+pyautogui

@@ -1,0 +1,23 @@
+total_timesteps: 100000
+seeds: [0,1,2,3,4]
+ppo:
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  ent_coef: 0.01
+  lr: 0.0003
+  clip_range: 0.2
+dqn:
+  buffer_size: 1200000
+  learning_starts: 1000
+  gamma: 0.99
+  lr: 0.0001
+env:
+  blur: true
+  hist_eq: true
+  reward_mode: sparse
+  termination_method: ocr
+  pixeldiff_thresh: 40000
+  action_sleep: 0.10
