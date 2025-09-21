@@ -18,6 +18,6 @@ env:
   blur: true
   hist_eq: true
   reward_mode: sparse
-  termination_method: ocr
-  pixeldiff_thresh: 40000
   action_sleep: 0.10
+  termination_method: template
+  template_thr: 0.62

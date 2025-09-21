@@ -1,0 +1,55 @@
+# configs/dqn_baseline.yaml
+experiment:
+  name: "dqn_baseline"
+  algo: "dqn"
+  seeds: [0, 1, 2]
+  total_timesteps: 50000
+  device: "cpu"
+
+env:
+  input_backend: "auto"
+  auto_calibrate: true
+  focus_on_reset: false
+  templates_dir: "templates"
+  monitor_index: 1
+  game_region: null
+
+  blur: false
+  hist_eq: false
+  edge_enhance: false
+  temporal_stack: 1
+
+  obs_resolution: "default"
+  obs_channels: "grayscale"
+
+  reward_mode: "sparse"
+  reward_scaling: 1.0
+
+  action_repeat: 1
+  action_sleep: 0.10
+  frame_skip: 1
+
+  noise_level: 0.0
+  brightness_var: 0.0
+  contrast_var: 0.0
+
+  termination_method: "template"
+  template_thr: 0.62
+
+dqn:
+  buffer_size: 1200000
+  learning_starts: 1000
+  batch_size: 32
+  gamma: 0.99
+  tau: 1.0
+  target_update: 10000
+  eps_start: 1.0
+  eps_final: 0.1
+  eps_fraction: 0.1
+  lr: 0.0001
+
+logging:
+  log_dir: "logs/dqn"
+  checkpoint_freq: 10000
+  tensorboard: false
+  csv: true

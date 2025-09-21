@@ -9,10 +9,3 @@ pillow>=10.0.0
 pyyaml>=6.0
 matplotlib>=3.7.0
 pandas>=2.0.0
-seaborn>=0.12.0
-
-# Input handling
-pynput>=1.7.6
-
-# Optional: for template matching improvements
-scikit-image>=0.21.0

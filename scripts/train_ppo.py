@@ -1,86 +1,130 @@
-import os, time, argparse, webbrowser
-from stable_baselines3 import PPO
-from stable_baselines3.common.logger import configure
-from envs.chrome_dino_env import ChromeDinoEnv
-from utils.callbacks import CheckpointEveryN, WallClockLogger
-from utils.seeding import set_all_seeds
-from utils.metadata import save_run_config
+# scripts/train_ppo.py
+import os
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")  # safe on macOS
 
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument("--seeds", type=int, nargs="+", default=[0,1,2,3,4])
-    p.add_argument("--total_timesteps", type=int, default=100_000)
-    p.add_argument("--n_steps", type=int, default=2048)
-    p.add_argument("--batch_size", type=int, default=64)
-    p.add_argument("--n_epochs", type=int, default=10)
-    p.add_argument("--gamma", type=float, default=0.99)
-    p.add_argument("--gae_lambda", type=float, default=0.95)
-    p.add_argument("--ent_coef", type=float, default=0.01)
-    p.add_argument("--lr", type=float, default=3e-4)
-    p.add_argument("--clip_range", type=float, default=0.2)
-    p.add_argument("--check_freq", type=int, default=10_000)
+import argparse, json, yaml
+from copy import deepcopy
 
-    # Ablations
-    p.add_argument("--no_blur", action="store_true")
-    p.add_argument("--no_hist_eq", action="store_true")
-    p.add_argument("--reward_mode", choices=["sparse","shaped"], default="sparse")
-    p.add_argument("--termination", choices=["ocr","pixeldiff"], default="ocr")
-    p.add_argument("--pixeldiff_thresh", type=int, default=40_000)
-    p.add_argument("--action_sleep", type=float, default=0.10)
-    return p.parse_args()
+def load_yaml(path): 
+    with open(path, "r") as f: return yaml.safe_load(f)
+
+def apply_overrides(cfg, sets):
+    if not sets: return cfg
+    for kv in sets:
+        if "=" not in kv: raise ValueError(f"--set expects key=value, got: {kv}")
+        key, val = kv.split("=", 1)
+        lv = val.lower()
+        if lv in ("true","false"): cast_val = (lv=="true")
+        else:
+            try: cast_val = int(val)
+            except ValueError:
+                try: cast_val = float(val)
+                except ValueError: cast_val = val
+        cur = cfg; parts = key.split(".")
+        for p in parts[:-1]:
+            if p not in cur or not isinstance(cur[p], dict): cur[p] = {}
+            cur = cur[p]
+        cur[parts[-1]] = cast_val
+    return cfg
+
+def ensure_dir(p): os.makedirs(p, exist_ok=True)
 
 def main():
-    args = parse_args()
-    try:
-        webbrowser.open('chrome://dino/')
-    except Exception:
-        pass
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", type=str, default="configs/ppo_baseline.yaml")
+    ap.add_argument("--seeds", nargs="+", type=int, default=None)
+    ap.add_argument("--total_timesteps", type=int, default=None)
+    ap.add_argument("--log_dir", type=str, default=None)
+    ap.add_argument("--device", type=str, default=None)  # cpu|mps|cuda|auto
 
-    for seed in args.seeds:
-        set_all_seeds(seed)
-        run_dir = os.path.join("logs", "ppo", f"seed_{seed}")
+    # env shortcuts
+    for k,t in [("temporal_stack",int),("frame_skip",int),("action_repeat",int),
+                ("obs_resolution",str),("obs_channels",str),
+                ("blur",str),("hist_eq",str),("edge_enhance",str),
+                ("noise_level",float),("brightness_var",float),("contrast_var",float),
+                ("reward_mode",str),("reward_scaling",float),("action_sleep",float),
+                ("termination_method",str),("template_thr",float),
+                ("input_backend",str),("auto_calibrate",str),("monitor_index",int),
+                ("focus_on_reset",str)]:
+        ap.add_argument(f"--{k}", type=t, default=None)
+
+    ap.add_argument("--set", nargs="*", default=[])
+    args = ap.parse_args()
+
+    cfg = load_yaml(args.config)
+    if args.seeds is not None:           cfg.setdefault("experiment", {})["seeds"] = args.seeds
+    if args.total_timesteps is not None: cfg.setdefault("experiment", {})["total_timesteps"] = args.total_timesteps
+    if args.log_dir is not None:         cfg.setdefault("logging", {})["log_dir"] = args.log_dir
+    if args.device is not None:          cfg.setdefault("experiment", {})["device"] = args.device
+
+    env_cfg = cfg.setdefault("env", {})
+    def maybe(k,v):
+        if v is not None: env_cfg[k] = (str(v).lower()=="true") if k in ("blur","hist_eq","edge_enhance","auto_calibrate","focus_on_reset") else v
+    for k in ["temporal_stack","frame_skip","action_repeat","obs_resolution","obs_channels",
+              "blur","hist_eq","edge_enhance","noise_level","brightness_var","contrast_var",
+              "reward_mode","reward_scaling","action_sleep","termination_method","template_thr",
+              "input_backend","auto_calibrate","monitor_index","focus_on_reset"]:
+        maybe(k, getattr(args, k))
+    cfg = apply_overrides(cfg, args.set)
+
+    # delay heavy imports
+    import numpy as np, torch
+    from stable_baselines3 import PPO
+    from stable_baselines3.common.logger import configure as sb3_configure
+    from stable_baselines3.common.callbacks import CheckpointCallback
+    from envs.chrome_dino_env import ChromeDinoEnv
+
+    exp     = cfg.get("experiment", {})
+    seeds   = exp.get("seeds", [0])
+    steps   = int(exp.get("total_timesteps", 50000))
+    device  = exp.get("device", "cpu")
+    ppo_cfg = cfg.get("ppo", {})
+    log_cfg = cfg.get("logging", {})
+
+    base_log_dir = log_cfg.get("log_dir", "logs/ppo"); ensure_dir(base_log_dir)
+    backends = ["stdout"]; 
+    if log_cfg.get("csv", True): backends.append("csv")
+    if log_cfg.get("tensorboard", False): backends.append("tensorboard")
+
+    print("=== Resolved Config ===")
+    print(json.dumps(cfg, indent=2))
+
+    for seed in seeds:
+        run_dir = os.path.join(base_log_dir, f"seed_{seed}")
         ckpt_dir = os.path.join(run_dir, "checkpoints")
-        tb_dir   = os.path.join(run_dir, "tb")
-        os.makedirs(run_dir, exist_ok=True)
+        ensure_dir(run_dir); ensure_dir(ckpt_dir)
+        with open(os.path.join(run_dir, "run_config.json"), "w") as f: json.dump(cfg, f, indent=2)
 
-        env_cfg = dict(
-            blur=(not args.no_blur),
-            hist_eq=(not args.no_hist_eq),
-            reward_mode=args.reward_mode,
-            termination_method=args.termination,
-            pixeldiff_thresh=args.pixeldiff_thresh,
-            action_sleep=args.action_sleep,
-            seed=seed,
-        )
-        save_run_config(os.path.join(run_dir, "run_config.json"), env_cfg)
+        os.environ["PYTHONHASHSEED"] = str(seed)
+        np.random.seed(seed); torch.manual_seed(seed)
 
-        env = ChromeDinoEnv(**env_cfg)
+        env = ChromeDinoEnv(**deepcopy(env_cfg), seed=seed)
 
         model = PPO(
-            "CnnPolicy",
-            env,
-            verbose=1,
-            n_steps=args.n_steps,
-            batch_size=args.batch_size,
-            n_epochs=args.n_epochs,
-            gamma=args.gamma,
-            gae_lambda=args.gae_lambda,
-            ent_coef=args.ent_coef,
-            learning_rate=args.lr,
-            clip_range=args.clip_range,
-            tensorboard_log=tb_dir,
+            "CnnPolicy", env, device=device, verbose=1,
+            n_steps=ppo_cfg.get("n_steps", 2048),
+            batch_size=ppo_cfg.get("batch_size", 64),
+            n_epochs=ppo_cfg.get("n_epochs", 10),
+            gamma=ppo_cfg.get("gamma", 0.99),
+            gae_lambda=ppo_cfg.get("gae_lambda", 0.95),
+            ent_coef=ppo_cfg.get("ent_coef", 0.01),
+            learning_rate=ppo_cfg.get("lr", 3e-4),
+            clip_range=ppo_cfg.get("clip_range", 0.2),
+            tensorboard_log=(run_dir if "tensorboard" in backends else None),
             seed=seed,
         )
-
-        logger = configure(tb_dir, ["stdout", "csv", "tensorboard"])
-        model.set_logger(logger)
-
-        callback = CheckpointEveryN(args.check_freq, ckpt_dir)
-        meta_cb  = WallClockLogger(save_dir=run_dir, algo="PPO", seed=seed, env_cfg=env_cfg)
-
-        model.learn(total_timesteps=args.total_timesteps, callback=[callback, meta_cb])
-
+        model.set_logger(sb3_configure(run_dir, backends))
+        cb = CheckpointCallback(save_freq=log_cfg.get("checkpoint_freq", 10000), save_path=ckpt_dir, name_prefix="model")
+        print(f"[seed {seed}] training for {steps} timesteps on device='{device}' …")
+        model.learn(total_timesteps=steps, callback=cb)
+        model.save(os.path.join(run_dir, "final_model"))
         env.close()
 
 if __name__ == "__main__":
+    try:
+        import faulthandler, sys; faulthandler.enable(file=sys.stderr, all_threads=True)
+    except Exception: pass
     main()
+
+

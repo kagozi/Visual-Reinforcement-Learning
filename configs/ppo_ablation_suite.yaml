@@ -1,0 +1,23 @@
+# configs/dqn_ablation_suite.yaml
+sweep:
+  - name: "baseline_gray"
+    env: { blur: false, hist_eq: false, temporal_stack: 1, obs_channels: "grayscale" }
+  - name: "stack4"
+    env: { blur: false, hist_eq: false, temporal_stack: 4 }
+  - name: "frame_skip4"
+    env: { blur: false, hist_eq: false, frame_skip: 4 }
+  - name: "domain_rand"
+    env:
+      blur: false
+      hist_eq: false
+      temporal_stack: 1
+      brightness_var: 0.10
+      contrast_var: 0.10
+      noise_level: 0.02
+  - name: "highres_gray"
+    env:
+      obs_channels: "grayscale"
+      obs_resolution: "high"
+experiment:
+  seeds: [0, 1, 2]
+  total_timesteps: 50000

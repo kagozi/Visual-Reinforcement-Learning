@@ -1,3 +1,4 @@
+# scripts/plot_curves.py
 import os, glob, argparse
 import pandas as pd
 import numpy as np
@@ -10,16 +11,16 @@ def parse_args():
     return p.parse_args()
 
 def load_progress_csvs(algo_dir):
-    # SB3 CSV logs live at tb/progress.csv per seed (we configured CSV logging)
     dfs = []
     for seed_dir in sorted(glob.glob(os.path.join(algo_dir, "seed_*"))):
-        csvs = glob.glob(os.path.join(seed_dir, "tb", "progress.csv"))
-        if not csvs: 
+        csv_path = os.path.join(seed_dir, "progress.csv")
+        if not os.path.exists(csv_path):
             continue
-        df = pd.read_csv(csvs[0])
+        df = pd.read_csv(csv_path)
         df["seed_dir"] = os.path.basename(seed_dir)
         dfs.append(df)
     return dfs
+
 
 def mean_ci(df, x_col, y_col, num_bins=200):
     # align different lengths by binning timesteps

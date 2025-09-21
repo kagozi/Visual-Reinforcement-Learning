@@ -1,0 +1,54 @@
+experiment:
+  name: "ppo_baseline"
+  algo: "ppo"
+  seeds: [0, 1, 2]
+  total_timesteps: 50000
+  device: "cpu"      # docker default; set "cuda" on GPU images
+  open_chrome: false # handled by docker entrypoint
+
+env:
+  input_backend: "xdotool"        # auto|xdotool|pynput
+  auto_calibrate: true
+  templates_dir: "templates"
+  monitor_index: 0                # Xvfb is monitor 0 in mss
+  game_region: null
+
+  # termination
+  termination_method: "template"  # pixeldiff|template|either
+  template_thr: 0.62
+
+  # === CORE RESEARCH ABLATIONS (baseline) ===
+  blur: false
+  hist_eq: false
+  edge_enhance: false
+  temporal_stack: 1
+
+  obs_resolution: "default"   # low|default|high
+  obs_channels: "grayscale"   # grayscale|rgb|edges|mixed
+
+  reward_mode: "sparse"       # sparse|dense|distance|survival
+  reward_scaling: 1.0
+
+  action_repeat: 1
+  action_sleep: 0.10
+  frame_skip: 1
+
+  noise_level: 0.0
+  brightness_var: 0.0
+  contrast_var: 0.0
+
+ppo:
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  ent_coef: 0.01
+  lr: 0.0003
+  clip_range: 0.2
+
+logging:
+  log_dir: "logs/ppo"
+  checkpoint_freq: 10000
+  tensorboard: false   # enable if you want; slower in containers
+  csv: true
