@@ -1,5 +1,4 @@
-version: "3.9"
-
+# version: "3.9"
 x-common: &trainer
   platform: linux/amd64
   build: .
@@ -18,7 +17,7 @@ services:
     command: >
       python - <<'PY'
       from envs.chrome_dino_env import ChromeDinoEnv
-      env = ChromeDinoEnv(input_backend="xdotool", auto_calibrate=True, monitor_index=0,
+      env = ChromeDinoEnv(input_backend="xdotool", auto_calibrate=True, monitor_index=0, debug_dump_dir="logs/snapshots", debug_dump_once=True, debug_tag="snap",
                           termination_method="template")
       obs,_ = env.reset()
       for _ in range(5):
@@ -38,7 +37,7 @@ services:
       --seeds 0 1 2
       --total_timesteps 50000
       --device cpu
-      --set env.input_backend=xdotool env.auto_calibrate=true env.termination_method=template
+      --set experiment.debug_dump=true env.input_backend=xdotool env.auto_calibrate=true env.termination_method=template
     profiles: ["ppo","all"]
 
   # DQN baseline
@@ -49,5 +48,5 @@ services:
       --config configs/dqn_baseline.yaml
       --seeds 0 1 2
       --total_timesteps 50000
-      --set env.input_backend=xdotool env.termination_method=template
+      --set experiment.debug_dump=true env.input_backend=xdotool env.termination_method=template
     profiles: ["dqn","all"]

@@ -94,6 +94,13 @@ def main():
         run_dir = os.path.join(base_log_dir, f"seed_{seed}")
         ckpt_dir = os.path.join(run_dir, "checkpoints")
         ensure_dir(run_dir); ensure_dir(ckpt_dir)
+        
+        # enable debug dump via experiment flag
+        if cfg.get("experiment", {}).get("debug_dump", False):
+            env_cfg["debug_dump_dir"] = os.path.join(run_dir, "debug")
+            env_cfg.setdefault("debug_dump_once", True)
+            env_cfg.setdefault("debug_tag", "calibration")
+            
         with open(os.path.join(run_dir, "run_config.json"), "w") as f: json.dump(cfg, f, indent=2)
 
         os.environ["PYTHONHASHSEED"] = str(seed)

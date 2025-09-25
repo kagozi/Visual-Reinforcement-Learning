@@ -1,5 +1,6 @@
 import os, sys, time, subprocess
 import cv2, numpy as np
+import datetime as _dt
 from mss import mss
 from gymnasium import Env
 from gymnasium.spaces import Box, Discrete
@@ -28,7 +29,9 @@ class ChromeDinoEnv(Env):
         focus_on_reset: bool = False,
 
         # === ABLATIONS ===
-        blur: bool = True, hist_eq: bool = True, edge_enhance: bool = False,
+        blur: bool = False, 
+        hist_eq: bool = False, 
+        edge_enhance: bool = False,
         temporal_stack: int = 1,
         obs_resolution: str = "default",  # low|default|high
         obs_channels: str = "grayscale",  # grayscale|rgb|edges|mixed
@@ -285,6 +288,10 @@ class ChromeDinoEnv(Env):
                 print(f"Found game region in frame {i+1}: {self.game_region}")
                 return
         print(f"[WARN] Could not auto-detect; using default: {self.game_region}")
+        try:
+            self._save_debug_regions(when=self.debug_tag or "calibration")
+        except Exception as e:
+            print(f"[WARN] debug snapshot failed: {e}")
 
     # --------- gym API ----------
     def seed(self, seed: Optional[int] = None): self._rng = np.random.default_rng(seed)
@@ -317,6 +324,10 @@ class ChromeDinoEnv(Env):
 
         raw = self._grab(self.game_region)
         obs = self._handle_temporal_stacking(self._preprocess_frame(raw))
+        try:
+            self._save_debug_regions(when="reset")
+        except Exception as e:
+            print(f"[WARN] debug snapshot failed: {e}")
         return self._ensure_valid_observation(obs), {}
 
     def step(self, action: int):
@@ -383,3 +394,47 @@ class ChromeDinoEnv(Env):
         ax[0].imshow(cv2.cvtColor(full, cv2.COLOR_BGR2RGB)); ax[0].set_title("Full Screen (green=game)"); ax[0].axis('off')
         ax[1].imshow(cv2.cvtColor(game_img, cv2.COLOR_BGR2RGB)); ax[1].set_title(f"Game Region {game_img.shape}"); ax[1].axis('off')
         plt.tight_layout(); plt.show()
+        
+    # ---------- debug snapshot writers ----------
+    def _save_debug_regions(self, when: str = "calibration"):
+        """
+        Save a full-screen shot (with green box), the raw game crop,
+        and the preprocessed observation into debug_dump_dir.
+        """
+        if not self.debug_dump_dir:
+            return
+        if self._debug_dumped and self.debug_dump_once:
+            return
+
+        ts = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        outdir = os.path.abspath(self.debug_dump_dir)
+        os.makedirs(outdir, exist_ok=True)
+
+        full = self._grab_full()
+        # draw game box in green
+        cv2.rectangle(
+            full,
+            (self.game_region['left'], self.game_region['top']),
+            (self.game_region['left'] + self.game_region['width'],
+             self.game_region['top'] + self.game_region['height']),
+            (0, 255, 0), 3
+        )
+        cv2.imwrite(os.path.join(outdir, f"{ts}_{when}_full_with_box.png"), full)
+
+        crop = self._grab(self.game_region)
+        cv2.imwrite(os.path.join(outdir, f"{ts}_{when}_game_region.png"), crop)
+
+        proc = self._preprocess_frame(crop)
+        # displayable: pick a single channel if stacked/mixed
+        if proc.ndim == 3:
+            if proc.shape[-1] == 1:
+                disp = proc[..., 0]
+            else:
+                # If RGB(+edges), write RGB; if stacked frames, use first channel
+                disp = proc[..., :3] if proc.shape[-1] >= 3 else proc[..., 0]
+        else:
+            disp = proc
+        cv2.imwrite(os.path.join(outdir, f"{ts}_{when}_processed.png"), disp)
+
+        self._debug_dumped = True
+
