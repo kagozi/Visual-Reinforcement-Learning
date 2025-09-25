@@ -35,6 +35,10 @@ class ChromeDinoEnv(Env):
         reward_mode: str = "sparse", reward_scaling: float = 1.0,
         action_repeat: int = 1, action_sleep: float = 0.10, frame_skip: int = 1,
         noise_level: float = 0.0, brightness_var: float = 0.0, contrast_var: float = 0.0,
+        
+        debug_dump_dir: Optional[str] = None,   # NEW: where to save PNGs (or None to disable)
+        debug_dump_once: bool = True,           # NEW: dump only once per process
+        debug_tag: str = "calibration",         # NEW: name tag in filenames
 
         seed: Optional[int] = None, **kwargs
     ):
