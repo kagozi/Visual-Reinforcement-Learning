@@ -102,6 +102,12 @@ class ChromeDinoEnv(Env):
         if self.auto_calibrate:
             try: self._calibrate_regions()
             except Exception as e: print(f"[WARN] Auto-calibration failed ({e}); using defaults.")
+        
+         # --- debug snapshot config ---
+        self.debug_dump_dir = debug_dump_dir
+        self.debug_dump_once = bool(debug_dump_once)
+        self.debug_tag = str(debug_tag)
+        self._debug_dumped = False  # internal guard
 
     # --------- dims/channels ----------
     def _get_obs_dimensions(self):
