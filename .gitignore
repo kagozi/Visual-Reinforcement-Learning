@@ -1,8 +1,7 @@
 .venv
 .venv/*
-ppo/train/*
-ppo/logs/*.1
-ppo/logs/*.2
-ppo/logs/*.npz
+logs/*
 __pycache__/
 *.pyc
+*.zip
+.DS_Store

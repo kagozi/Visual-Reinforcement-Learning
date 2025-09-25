@@ -1,88 +1,52 @@
-
-# docker-compose.yml (fixed for Apple Silicon)
+# version: "3.9"
 x-common: &trainer
-  build: 
-    context: .
-    platform: linux/amd64  # Force consistent architecture
+  platform: linux/amd64
+  build: .
   image: dino-rl:latest
   working_dir: /app
   environment:
     - DISPLAY=:99
-    - PYTHONPATH=/app
+    - CHROME_URL=https://chromedino.com
   volumes:
-    - ./logs:/app/logs
-    - ./results:/app/results
-    - ./configs:/app/configs
-  networks:
-    - dino-net
-
-networks:
-  dino-net:
+    - ./:/app
 
 services:
+  # Quick smoke test (recommended to try first)
+  test:
+    <<: *trainer
+    command: >
+      python - <<'PY'
+      from envs.chrome_dino_env import ChromeDinoEnv
+      env = ChromeDinoEnv(input_backend="xdotool", auto_calibrate=True, monitor_index=0, debug_dump_dir="logs/snapshots", debug_dump_once=True, debug_tag="snap",
+                          termination_method="template")
+      obs,_ = env.reset()
+      for _ in range(5):
+          obs,r,d,tr,info = env.step(0)
+          if d: break
+      env.close()
+      print("smoke ok")
+      PY
+    profiles: ["test"]
+
   # PPO baseline
   ppo_baseline:
     <<: *trainer
     command: >
       python -m scripts.train_ppo
       --config configs/ppo_baseline.yaml
-      --seeds 0
-      --total_timesteps 10000
-      --set env.input_backend=xdotool env.auto_calibrate=true env.termination_method=pixeldiff
-    profiles: ["ppo", "all"]
+      --seeds 0 1 2
+      --total_timesteps 50000
+      --device cpu
+      --set experiment.debug_dump=true env.input_backend=xdotool env.auto_calibrate=true env.termination_method=template
+    profiles: ["ppo","all"]
 
-  # PPO: temporal stack 4
-  ppo_stack4:
+  # DQN baseline
+  dqn_baseline:
     <<: *trainer
     command: >
-      python -m scripts.train_ppo
-      --config configs/ppo_baseline.yaml
-      --seeds 0
-      --total_timesteps 10000
-      --set env.temporal_stack=4 env.blur=false env.hist_eq=false env.auto_calibrate=true
-    profiles: ["ablations", "all"]
-
-  # PPO: frame skip 4  
-  ppo_fs4:
-    <<: *trainer
-    command: >
-      python -m scripts.train_ppo
-      --config configs/ppo_baseline.yaml
-      --seeds 0
-      --total_timesteps 10000
-      --set env.frame_skip=4 env.blur=false env.hist_eq=false env.auto_calibrate=true
-    profiles: ["ablations", "all"]
-
-  # PPO: domain randomization
-  ppo_domain_rand:
-    <<: *trainer
-    command: >
-      python -m scripts.train_ppo
-      --config configs/ppo_baseline.yaml
-      --seeds 0
-      --total_timesteps 10000
-      --set env.brightness_var=0.10 env.contrast_var=0.10 env.noise_level=0.02 env.auto_calibrate=true
-    profiles: ["ablations", "all"]
-
-  # Test service (minimal)
-  test:
-    <<: *trainer
-    command: >
-      python -c "
-      print('Testing Docker environment...');
-      from utils.input_backends import KeySender;
-      key_sender = KeySender();
-      print('Input backend working!');
-      from envs.chrome_dino_env import ChromeDinoEnv;
-      print('Environment import working!');
-      print('All tests passed!')
-      "
-    profiles: ["test"]
-
-  # Interactive debugging
-  debug:
-    <<: *trainer
-    command: bash
-    stdin_open: true
-    tty: true
-    profiles: ["debug"]
+      python -m scripts.train_dqn
+      --config configs/dqn_baseline.yaml
+      --seeds 0 1 2
+      --total_timesteps 50000
+      --set experiment.debug_dump=true env.input_backend=xdotool env.termination_method=template
+    profiles: ["dqn","all"]

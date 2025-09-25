@@ -1,11 +1,17 @@
-gymnasium>=0.29.0
-stable-baselines3>=2.0.0
-opencv-python-headless>=4.8.0
-numpy>=1.24.0
-mss>=9.0.1
-pillow>=10.0.0
+# Allow PyTorch CPU wheels
+--extra-index-url https://download.pytorch.org/whl/cpu
 
-# Configuration and utilities
-pyyaml>=6.0
-matplotlib>=3.7.0
-pandas>=2.0.0
+numpy==1.26.4
+torch==2.3.1+cpu
+stable-baselines3==2.3.2
+gymnasium==0.29.1
+cloudpickle==2.2.1
+opencv-python==4.8.1.78
+mss==9.0.1
+matplotlib==3.7.3
+pandas==2.1.4
+scipy==1.10.1
+pyyaml==6.0.1
+tqdm==4.66.4
+tensorboard==2.16.2
+psutil==5.9.8

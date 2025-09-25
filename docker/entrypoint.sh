@@ -1,55 +1,36 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-echo "Starting Chrome Dino RL environment..."
+# Defaults (overridable via env)
+: "${DISPLAY:=:99}"
+: "${XVFB_W:=1280}"
+: "${XVFB_H:=800}"
+: "${XVFB_D:=24}"
+: "${CHROME_URL:=https://chromedino.com}"   # public clone works headless; chrome://dino won't in container
 
-# Start Xvfb in background
-echo "Starting virtual display..."
-Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset &
+# Start X virtual framebuffer
+Xvfb "$DISPLAY" -screen 0 ${XVFB_W}x${XVFB_H}x${XVFB_D} -nolisten tcp -nolisten unix &
 XVFB_PID=$!
 
-# Wait for X server to start
-sleep 3
+# Wait for X to be ready (avoid races)
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then break; fi
+  sleep 0.3
+done
 
-# Start Chromium with Dino game
-echo "Starting Chromium with Chrome Dino..."
+# Launch Chromium into the X server (no-sandbox required in most containers)
 chromium \
   --no-sandbox \
-  --disable-gpu \
   --disable-dev-shm-usage \
-  --disable-extensions \
-  --disable-plugins \
-  --hide-crash-restore-bubble \
-  --no-first-run \
-  --no-default-browser-check \
-  --user-data-dir=/tmp/chrome \
-  --window-size=1280,720 \
-  --start-maximized \
-  https://chromedino.com &
-
+  --disable-gpu \
+  --disable-software-rasterizer \
+  --window-size=1200,700 \
+  --window-position=50,50 \
+  "$CHROME_URL" >/tmp/chromium.log 2>&1 &
 CHROME_PID=$!
 
-# Wait for browser to load
-echo "Waiting for browser to load..."
-sleep 5
+# Small delay so page renders before your env first grab
+sleep 2
 
-# Function to cleanup processes
-cleanup() {
-    echo "Cleaning up processes..."
-    kill $CHROME_PID 2>/dev/null || true
-    kill $XVFB_PID 2>/dev/null || true
-    exit 0
-}
-
-# Set up signal handlers
-trap cleanup SIGTERM SIGINT
-
-# If no command specified, run interactive shell
-if [ $# -eq 0 ]; then
-    echo "No command specified. Starting interactive shell..."
-    exec bash
-fi
-
-# Run the provided command
-echo "Executing command: $*"
+# Hand off to the trainer command from docker-compose (PPO/DQN/etc)
 exec "$@"
