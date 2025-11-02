@@ -16,3 +16,4 @@ pynput>=1.7.6
 
 # Optional: for template matching improvements
 scikit-image>=0.21.0
+pytesseract>=0.3.10

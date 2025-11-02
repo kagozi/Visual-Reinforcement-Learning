@@ -43,6 +43,7 @@ class ChromeDinoEnv(Env):
         debug_dump_once: bool = True,           # NEW: dump only once per process
         debug_tag: str = "calibration",         # NEW: name tag in filenames
 
+
         seed: Optional[int] = None, **kwargs
     ):
         super().__init__()
@@ -91,10 +92,17 @@ class ChromeDinoEnv(Env):
         self._load_templates()
 
         # Ablation knob states
-        self.use_blur = bool(blur); self.use_hist_eq = bool(hist_eq); self.use_edge_enhance = bool(edge_enhance)
-        self.reward_mode = reward_mode; self.reward_scaling = float(reward_scaling)
-        self.action_repeat = max(1, action_repeat); self.action_sleep = float(action_sleep); self.frame_skip = max(1, frame_skip)
-        self.noise_level = max(0.0, noise_level); self.brightness_var = max(0.0, brightness_var); self.contrast_var = max(0.0, contrast_var)
+        self.use_blur = bool(blur); 
+        self.use_hist_eq = bool(hist_eq); 
+        self.use_edge_enhance = bool(edge_enhance)
+        self.reward_mode = reward_mode; 
+        self.reward_scaling = float(reward_scaling)
+        self.action_repeat = max(1, action_repeat); 
+        self.action_sleep = float(action_sleep); 
+        self.frame_skip = max(1, frame_skip)
+        self.noise_level = max(0.0, noise_level); 
+        self.brightness_var = max(0.0, brightness_var); 
+        self.contrast_var = max(0.0, contrast_var)
 
         # State
         self._rng = np.random.default_rng(seed)
@@ -219,24 +227,155 @@ class ChromeDinoEnv(Env):
 
     # --------- termination detection ----------
     def _check_game_over_template(self) -> bool:
-        if self.game_over_tmpl is None: return False
-        try:
-            gray = cv2.cvtColor(self._grab_full(), cv2.COLOR_BGR2GRAY)
-            pt, _ = self._match_template_multi_scale(gray, self.game_over_tmpl, thr=self.template_thr)
-            return pt is not None
-        except Exception as e:
-            print(f"[WARN] template match failed: {e}")
+        """Robust template matching that works in Docker/headless Chrome"""
+        if self.game_over_tmpl is None:
             return False
-
+        
+        try:
+            # Grab from game region instead of full screen for better reliability
+            game_frame = self._grab(self.game_region)
+            gray = cv2.cvtColor(game_frame, cv2.COLOR_BGR2GRAY)
+            
+            # Try multiple thresholds for different environments
+            thresholds = [0.45, 0.5, 0.55]  # Lower thresholds for headless
+            
+            for thr in thresholds:
+                pt, score = self._match_template_multi_scale(
+                    gray, self.game_over_tmpl, thr=thr
+                )
+                
+                if pt is not None and score > thr:
+                    print(f"[TERMINATION] Template match found (score={score:.3f}, thr={thr}) at step {self.step_count}")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"[WARN] Template matching error: {e}")
+            return False
+        
+    # def _check_game_over_pixeldiff(self, obs: np.ndarray) -> bool:
+    #     """Improved pixel difference detection"""
+    #     small = np.mean(obs, axis=-1) if (len(obs.shape) == 3 and obs.shape[-1] > 1) else obs.squeeze()
+        
+    #     if self.prev_frame_small is None:
+    #         self.prev_frame_small = small
+    #         return False
+        
+    #     diff = np.abs(small.astype(np.int32) - self.prev_frame_small.astype(np.int32)).sum()
+    #     self.prev_frame_small = small
+        
+    #     # Key insight: Game over screen is STATIC (very low diff)
+    #     # But normal gameplay has HIGH diff (dino moving, obstacles scrolling)
+    #     # We need CONSECUTIVE static frames to avoid false positives
+        
+    #     STATIC_THRESHOLD = 3000  # Lower than 5000
+    #     CONSECUTIVE_REQUIRED = 3  # Need 3 frames, not 5
+        
+    #     if diff < STATIC_THRESHOLD:
+    #         self.static_frames_count += 1
+    #     else:
+    #         self.static_frames_count = 0
+        
+    #     is_game_over = self.static_frames_count >= CONSECUTIVE_REQUIRED
+        
+    #     if is_game_over:
+    #         print(f"[TERMINATION] Pixel diff game over detected at step {self.step_count}")
+        
+    #     return is_game_over
+    
     def _check_game_over_pixeldiff(self, obs: np.ndarray) -> bool:
+        """Improved pixel difference detection for headless environments"""
         small = np.mean(obs, axis=-1) if (len(obs.shape) == 3 and obs.shape[-1] > 1) else obs.squeeze()
+        
         if self.prev_frame_small is None:
-            self.prev_frame_small = small; return False
+            self.prev_frame_small = small
+            return False
+        
         diff = np.abs(small.astype(np.int32) - self.prev_frame_small.astype(np.int32)).sum()
         self.prev_frame_small = small
-        self.static_frames_count = self.static_frames_count + 1 if diff < 5000 else 0
-        return self.static_frames_count >= 5
+        
+        # Adjusted thresholds for headless Chrome
+        STATIC_THRESHOLD = 2000  # Even lower for headless
+        CONSECUTIVE_REQUIRED = 4  # More conservative
+        
+        if diff < STATIC_THRESHOLD:
+            self.static_frames_count += 1
+        else:
+            self.static_frames_count = 0
+        
+        is_game_over = self.static_frames_count >= CONSECUTIVE_REQUIRED
+        
+        if is_game_over:
+            print(f"[TERMINATION] Pixel diff game over detected at step {self.step_count} (diff={diff})")
+        
+        return is_game_over
+    
+    def _check_game_over_ocr_fallback(self) -> bool:
+        """OCR-based fallback for headless environments"""
+        try:
+            import pytesseract
+            
+            # Grab a region where "Game Over" text typically appears
+            game_frame = self._grab(self.game_region)
+            gray = cv2.cvtColor(game_frame, cv2.COLOR_BGR2GRAY)
+            
+            # Enhance contrast for better OCR
+            enhanced = cv2.equalizeHist(gray)
+            
+            # Use pytesseract to detect text
+            text = pytesseract.image_to_string(enhanced).lower()
+            
+            game_over_keywords = ["game over", "over", "game"]
+            if any(keyword in text for keyword in game_over_keywords):
+                print(f"[TERMINATION] OCR detected game over: '{text.strip()}'")
+                return True
+                
+        except ImportError:
+            print("[INFO] pytesseract not available for OCR fallback")
+        except Exception as e:
+            print(f"[WARN] OCR fallback failed: {e}")
+            
+        return False
+    
+    # def _check_combined_termination(self, obs: np.ndarray) -> bool:
+    #     """Robust combined termination with safety timeout"""
+    #     # Check configured methods
+    #     if self.termination_method == "template":
+    #         done = self._check_game_over_template()
+    #     elif self.termination_method == "pixeldiff":
+    #         done = self._check_game_over_pixeldiff(obs)
+    #     else:
+    #         t1 = self._check_game_over_template()
+    #         t2 = self._check_game_over_pixeldiff(obs)
+    #         done = t1 or t2
+    
+    #     return done
 
+    def _check_combined_termination(self, obs: np.ndarray) -> bool:
+        """Robust combined termination with multiple fallbacks"""
+        # done = self._check_game_over_template()
+        done = self._check_game_over_pixeldiff(obs)
+        # if self.termination_method == "template":
+        #     done = self._check_game_over_template()
+        # elif self.termination_method == "pixeldiff":
+        #     done = self._check_game_over_pixeldiff(obs)
+        # else:  # "either"
+        #     t1 = self._check_game_over_template()
+        #     t2 = self._check_game_over_pixeldiff(obs)
+        #     t3 = self._check_game_over_ocr_fallback()
+        #     done = t1 or t2 or t3
+        
+        # If primary methods fail, try OCR fallback (especially for headless)
+        # if not done and self.step_count > 100:  # Only after some gameplay
+        #     done = self._check_game_over_ocr_fallback()
+            
+        # # Safety timeout to prevent infinite episodes
+        # if self.step_count >= 5000:  # Very generous timeout
+        #     print(f"[TERMINATION] Safety timeout at step {self.step_count}")
+        #     return True
+            
+        return done
     # --------- template helpers ----------
     def detect_color_mode(self, frame_bgr: np.ndarray) -> str:
         g = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
@@ -314,6 +453,7 @@ class ChromeDinoEnv(Env):
         self._focus_chrome()
         self.key.press("space")  # start/restart
         time.sleep(1.0)
+        self.key.press("space")  # start/restart
         if self.auto_calibrate:
             try: self._calibrate_regions()
             except Exception as e: print(f"[WARN] Re-calibration failed: {e}")
@@ -330,33 +470,71 @@ class ChromeDinoEnv(Env):
             print(f"[WARN] debug snapshot failed: {e}")
         return self._ensure_valid_observation(obs), {}
 
+    # def step(self, action: int):
+    #     total_reward = 0.0
+        
+    #     for _ in range(self.action_repeat):
+    #         if action == 1: self.key.press("up")
+    #         elif action == 2: self.key.press("down")
+    #         time.sleep(self.action_sleep)
+
+    #     done = False
+    #     for i in range(self.frame_skip):
+    #         raw = self._grab(self.game_region)
+    #         obs = self._handle_temporal_stacking(self._preprocess_frame(raw))
+    #         self.step_count += 1
+
+    #         # Use the combined termination method
+    #         done = self._check_combined_termination(obs)
+
+    #         total_reward += self._calculate_reward(done)
+    #         if done: break
+    #         if i < self.frame_skip - 1: 
+    #             time.sleep(self.action_sleep / self.frame_skip)
+
+    #     obs = self._ensure_valid_observation(obs)
+        
+    #     # Important: Mark truncated episodes for SB3
+    #     truncated = (self.step_count >= 2000) and not done
+        
+    #     return obs, total_reward, done, truncated, {
+    #         "step_count": self.step_count,
+    #         "survival_time": self.survival_time,
+    #         "ablation_config": self.ablation_config,
+    # }
     def step(self, action: int):
-        total_reward = 0.0
-        for _ in range(self.action_repeat):
-            if action == 1: self.key.press("up")
-            elif action == 2: self.key.press("down")
-            time.sleep(self.action_sleep)
+        reward = 0.0
+        # 0: noop, 1: jump, 2: duck
+        if action == 1:
+            self.key.press("up")
+        elif action == 2:
+            self.key.press("down")
 
-        done = False
-        for i in range(self.frame_skip):
-            raw = self._grab(self.game_region)
-            obs = self._handle_temporal_stacking(self._preprocess_frame(raw))
-            self.step_count += 1
+        # Let the game advance a tick
+        time.sleep(self.action_sleep)
 
-            t1 = (self.termination_method in ("template", "either")) and self._check_game_over_template()
-            t2 = (self.termination_method in ("pixeldiff", "either")) and self._check_game_over_pixeldiff(obs)
-            done = bool(t1 or t2)
-
-            total_reward += self._calculate_reward(done)
-            if done: break
-            if i < self.frame_skip - 1: time.sleep(self.action_sleep / self.frame_skip)
-
+        # Grab and preprocess one fresh frame
+        raw = self._grab(self.game_region)
+        obs = self._preprocess_frame(raw)
         obs = self._ensure_valid_observation(obs)
-        return obs, total_reward, done, False, {
+
+        # Book-keeping
+        self.step_count += 1
+
+        # Termination (template/pixeldiff/either per your setting)
+        done = self._check_combined_termination(obs)
+
+        # Simple reward
+        # reward = 1.0 if not done else -10.0
+        reward += self._calculate_reward(done)
+
+        info = {
             "step_count": self.step_count,
-            "survival_time": self.survival_time,
-            "ablation_config": self.ablation_config,
         }
+
+        # Gymnasium API: (obs, reward, terminated, truncated, info)
+        return obs, reward, done, False, info
+
 
     def render(self):
         frame = self._grab(self.game_region)
