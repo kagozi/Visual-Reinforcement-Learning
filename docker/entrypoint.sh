@@ -1,36 +1,55 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Defaults (overridable via env)
+# Defaults (overridable)
 : "${DISPLAY:=:99}"
 : "${XVFB_W:=1280}"
-: "${XVFB_H:=800}"
+: "${XVFB_H:=720}"
 : "${XVFB_D:=24}"
-: "${CHROME_URL:=https://chromedino.com}"   # public clone works headless; chrome://dino won't in container
+: "${CHROME_URL:=http://127.0.0.1:8080}"
+
+# Pick a Chromium binary that exists
+if command -v chromium >/dev/null 2>&1; then
+  CHROME_BIN=chromium
+elif command -v chromium-browser >/dev/null 2>&1; then
+  CHROME_BIN=chromium-browser
+else
+  echo "No chromium binary found"; exit 1
+fi
 
 # Start X virtual framebuffer
 Xvfb "$DISPLAY" -screen 0 ${XVFB_W}x${XVFB_H}x${XVFB_D} -nolisten tcp -nolisten unix &
 XVFB_PID=$!
 
-# Wait for X to be ready (avoid races)
-for i in 1 2 3 4 5 6 7 8 9 10; do
+# Wait for X to be ready
+for i in {1..20}; do
   if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then break; fi
-  sleep 0.3
+  sleep 0.25
 done
 
-# Launch Chromium into the X server (no-sandbox required in most containers)
-chromium \
+# Start nginx quietly (daemon on so this script can continue)
+nginx -g 'daemon on;'
+
+# Launch Chromium (headed) into the X server
+"$CHROME_BIN" \
   --no-sandbox \
   --disable-dev-shm-usage \
   --disable-gpu \
   --disable-software-rasterizer \
-  --window-size=1200,700 \
+  --no-first-run \
+  --disable-extensions \
+  --disable-infobars \
+  --force-device-scale-factor=1 \
+  --window-size="${XVFB_W},${XVFB_H}" \
   --window-position=50,50 \
   "$CHROME_URL" >/tmp/chromium.log 2>&1 &
-CHROME_PID=$!
 
-# Small delay so page renders before your env first grab
+# Small delay so page renders before your env’s first grab
 sleep 2
 
-# Hand off to the trainer command from docker-compose (PPO/DQN/etc)
+# Focus the Chromium window (best-effort)
+xdotool search --sync --onlyvisible --class "Chromium" windowactivate || true
+xdotool search --sync --onlyvisible --name "T-Rex Runner" windowactivate || true
+
+# Hand off to the container CMD (e.g., scripts.train_ppo)
 exec "$@"

@@ -362,3 +362,6 @@ If this benchmark or framework is useful in your research, please cite your pape
 ---
 
 Happy dino-running! 🦖
+
+docker build --no-cache -t dino-rl:latest .
+docker compose --profile dqn up --build dqn_baseline

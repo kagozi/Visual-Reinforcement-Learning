@@ -37,7 +37,7 @@ env:
   template_thr: 0.62
 
 dqn:
-  buffer_size: 1200000
+  buffer_size: 100000
   learning_starts: 1000
   batch_size: 32
   gamma: 0.99
@@ -47,6 +47,8 @@ dqn:
   eps_final: 0.1
   eps_fraction: 0.1
   lr: 0.0001
+  replay_buffer_kwargs:
+    optimize_memory_usage: true
 
 logging:
   log_dir: "logs/dqn"

@@ -1,34 +1,34 @@
-# version: "3.9"
 x-common: &trainer
-  platform: linux/amd64
   build: .
   image: dino-rl:latest
   working_dir: /app
   environment:
     - DISPLAY=:99
-    - CHROME_URL=https://chromedino.com
+    - CHROME_URL=http://127.0.0.1:8080     # served by nginx in the same container
   volumes:
     - ./:/app
+  # (Optional) let you view the game in your host browser at http://localhost:18080
+  ports:
+    - "18080:8080"
 
 services:
-  # Quick smoke test (recommended to try first)
   test:
     <<: *trainer
     command: >
       python - <<'PY'
       from envs.chrome_dino_env import ChromeDinoEnv
-      env = ChromeDinoEnv(input_backend="xdotool", auto_calibrate=True, monitor_index=0, debug_dump_dir="logs/snapshots", debug_dump_once=True, debug_tag="snap",
-                          termination_method="template")
+      env = ChromeDinoEnv(input_backend="xdotool", auto_calibrate=True, termination_method="template",
+                          template_thr=0.62)
       obs,_ = env.reset()
-      for _ in range(5):
-          obs,r,d,tr,info = env.step(0)
+      print("obs stats:", obs.shape, float(obs.mean()), float(obs.std()))
+      for _ in range(20):
+          obs,r,d,tr,_ = env.step(1)
           if d: break
       env.close()
       print("smoke ok")
       PY
     profiles: ["test"]
 
-  # PPO baseline
   ppo_baseline:
     <<: *trainer
     command: >
@@ -37,10 +37,9 @@ services:
       --seeds 0 1 2
       --total_timesteps 50000
       --device cpu
-      --set experiment.debug_dump=true env.input_backend=xdotool env.auto_calibrate=true env.termination_method=template
+      --set experiment.debug_dump=true env.input_backend=xdotool env.auto_calibrate=true env.termination_method=template env.template_thr=0.62
     profiles: ["ppo","all"]
 
-  # DQN baseline
   dqn_baseline:
     <<: *trainer
     command: >
@@ -48,5 +47,5 @@ services:
       --config configs/dqn_baseline.yaml
       --seeds 0 1 2
       --total_timesteps 50000
-      --set experiment.debug_dump=true env.input_backend=xdotool env.termination_method=template
+      --set experiment.debug_dump=true env.input_backend=xdotool env.auto_calibrate=true env.termination_method=template env.template_thr=0.62
     profiles: ["dqn","all"]
