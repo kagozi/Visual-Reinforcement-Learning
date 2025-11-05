@@ -13,10 +13,7 @@ Key features:
 - **Reproducibility**: Dockerized setup for consistent execution across machines.
 - **Evaluation**: Scripts for model evaluation and learning curve plotting.
 
-Results from baselines and ablations can be used to generate figures/tables for conference submissions (e.g., ICML, NeurIPS, CoRL).
-
 ## Setup
-
 ### Prerequisites
 - Docker (recommended for isolation and reproducibility).
 - Alternatively, native setup: Python 3.10+, Xvfb, Chromium, nginx, and dependencies from `requirements-docker.txt`.
