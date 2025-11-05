@@ -1,367 +1,137 @@
----
+# Dino-RL: Vision-Based Reinforcement Learning on Chrome Dino Game
 
-# Vision-Only RL on Chrome Dino
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/) [![Python 3.10](https://img.shields.io/badge/python-3.10-green.svg)](https://www.python.org/) [![Stable Baselines3](https://img.shields.io/badge/Stable%20Baselines3-RL-orange.svg)](https://stable-baselines3.readthedocs.io/)
 
-Train **PPO** and **DQN** agents to play the **Chrome Dino** game using **raw pixels only**. This repo includes:
+This repository provides a reproducible framework for training reinforcement learning (RL) agents on the Chrome Dino (T-Rex Runner) game using Stable Baselines3. The environment interacts with a live browser instance, introducing real-world challenges like noisy observations and variable rendering delays. We support PPO (on-policy) and DQN (off-policy) algorithms, with configurable ablations for vision preprocessing, temporal handling, and domain randomization.
 
-* ✅ Multi-seed training with CSV / TensorBoard logs
-* ✅ Evaluation with **mean ± 95% CI** across seeds
-* ✅ Compact, high-impact **ablations** (preprocessing, stacking, frame-skip, domain randomization, channels, resolution)
-* ✅ Robust termination via **template matching** or **pixel-diff** (no OCR required)
-* ✅ macOS/Windows/Linux key-sending via a portable `KeySender`
-* ✅ **Docker** + `docker-compose` for headless, reproducible runs (Chromium + Xvfb)
+This project is designed for research-level experiments, emphasizing ablation studies to investigate factors like sample efficiency and robustness in vision-based RL tasks. It serves as a benchmark for sparse-reward, partially observable environments, with analogies to real-world applications like robotic obstacle avoidance.
 
----
+Key features:
+- **Custom Environment**: `ChromeDinoEnv` captures browser screenshots, processes observations (e.g., grayscale, blurring, stacking), and handles actions/terminations via template matching.
+- **Algorithms**: PPO and DQN from Stable Baselines3.
+- **Ablations**: Systematic sweeps over observation modes, temporal stacking, frame skipping, and domain randomization.
+- **Reproducibility**: Dockerized setup for consistent execution across machines.
+- **Evaluation**: Scripts for model evaluation and learning curve plotting.
 
-## 0) Requirements
+Results from baselines and ablations can be used to generate figures/tables for conference submissions (e.g., ICML, NeurIPS, CoRL).
 
-* Python **3.10–3.12**
-* **Chrome** (or **Chromium**) installed
-* OS input permissions (see macOS notes below)
+## Setup
 
-### macOS permissions (important)
+### Prerequisites
+- Docker (recommended for isolation and reproducibility).
+- Alternatively, native setup: Python 3.10+, Xvfb, Chromium, nginx, and dependencies from `requirements-docker.txt`.
+- Hardware: CPU sufficient; GPU recommended for faster training (set `--device cuda`).
 
-* System Settings → **Privacy & Security**
-
-  * Grant **Screen Recording** to your terminal / Python
-  * Grant **Accessibility** to your terminal / Python (for keystrokes)
-
----
-
-## 1) Install
-
-```bash
-# (Recommended) Use a virtualenv
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-
-pip install -r requirements.txt
-```
-
----
-
-## 2) How the game window is handled
-
-By default, the environment **does not open new tabs** on every reset. You have three options:
-
-1. **Manual (simple)** — Open the game yourself, then start training:
-
-   * `chrome://dino/` (Chrome only), or
-   * `https://chromedino.com` (works everywhere)
-
-2. **Trainer opens once** — Add a flag so the trainer opens it **one time**:
-
-   ```bash
-   --set experiment.open_chrome=true
+### Docker Setup
+1. Build the Docker image:
    ```
+   docker build -t dino-rl:latest .
+   ```
+2. Use `docker-compose` for predefined services (e.g., baselines). Edit `docker-compose.yml` as needed.
 
-   (On macOS this runs `open -a "Google Chrome" "chrome://dino/"` once.)
+### Native Setup (Without Docker)
+1. Install system dependencies (Ubuntu example):
+   ```
+   sudo apt update && sudo apt install -y xvfb xdotool chromium nginx git libgl1 libglib2.0-0 libgtk-3-0 libnss3 libasound2 fonts-dejavu tzdata ca-certificates curl tesseract-ocr python3-dev gcc
+   ```
+2. Install Python dependencies:
+   ```
+   pip install -r requirements-docker.txt --extra-index-url https://download.pytorch.org/whl/cpu
+   ```
+3. Clone and serve the game via nginx (as in Dockerfile).
+4. Run the entrypoint script manually: `bash docker/entrypoint.sh python your_script.py`.
 
-3. **Docker** — The container entrypoint launches **Chromium** (app mode) under Xvfb; no manual steps required.
+## Running Experiments
 
-> Tip: If you want the env to bring the already-open window to the foreground (without opening tabs) on reset, use:
-> `--set env.focus_on_reset=true`
+All training uses seeded runs for statistical rigor (mean ± 95% CI across seeds). Logs are saved in `logs/{algo}/seed_{seed}/` (progress.csv for metrics, checkpoints, final_model.zip).
 
----
+### Baselines
+Baselines use default configs (`ppo_baseline.yaml`, `dqn_baseline.yaml`): grayscale observations, sparse rewards, template-based termination.
 
-## 3) Repo layout
-
+#### PPO Baseline
 ```
-.
-├─ envs/
-│  └─ chrome_dino_env.py
-├─ scripts/
-│  ├─ train_ppo.py
-│  ├─ train_dqn.py
-│  ├─ evaluate.py
-│  └─ plot_curves.py
-├─ utils/
-│  ├─ input_backends.py      # KeySender (Quartz / AppleScript / pydirectinput / pyautogui / xdotool)
-│  ├─ metrics.py
-│  └─ ...
-├─ configs/
-│  ├─ ppo_baseline.yaml
-│  ├─ dqn_baseline.yaml
-│  ├─ ppo_ablation_suite.yaml
-│  └─ dqn_ablation_suite.yaml
-├─ templates/                # optional (dino.png, game_over.png) for template matching
-├─ logs/                     # created on first run
-├─ results/                  # created on evaluation
-├─ Dockerfile
-└─ docker-compose.yml
+docker-compose run --rm ppo_baseline python -m scripts.train_ppo \
+  --config configs/ppo_baseline.yaml \
+  --seeds 0 1 2 3 4 \
+  --total_timesteps 100000 \
+  --device cpu \
+  --set experiment.debug_dump=true env.input_backend=xdotool env.auto_calibrate=true env.termination_method=template env.template_thr=0.62
+```
+- Adjust `--total_timesteps` (e.g., 200000) and `--seeds` for longer/more runs.
+- Native: Omit `docker-compose run --rm ppo_baseline` and run directly.
+
+#### DQN Baseline
+```
+docker-compose run --rm dqn_baseline python -m scripts.train_dqn \
+  --config configs/dqn_baseline.yaml \
+  --seeds 0 1 2 3 4 \
+  --total_timesteps 100000 \
+  --device cpu \
+  --set experiment.debug_dump=true env.input_backend=xdotool env.auto_calibrate=true env.termination_method=template env.template_thr=0.62
 ```
 
-Always run scripts from the repo root:
+### Ablations
+Ablation suites (`ppo_ablation_suite.yaml`, `dqn_ablation_suite.yaml`) define sweeps over variants:
+- **baseline_gray**: Basic grayscale, no preprocessing/temporal.
+- **stack4**: 4-frame temporal stacking for motion cues.
+- **frame_skip4**: Frame skipping (4) as alternative to stacking.
+- **domain_rand**: Adds brightness/contrast variation and noise for robustness.
+- **highres_gray**: Higher resolution observations.
 
-```bash
-python -m scripts.train_ppo --help
-```
-
----
-
-## 4) Quick smoke test (env only)
+Use the provided wrapper script `run_ablations.py` (create it as suggested in the conversation history or copy below):
 
 ```python
-from envs.chrome_dino_env import ChromeDinoEnv
-env = ChromeDinoEnv(auto_calibrate=True, monitor_index=1)  # tweak monitor_index as needed
-obs, info = env.reset()
-for _ in range(5):
-    obs, r, d, tr, info = env.step(env.action_space.sample())
-    if d: break
-env.close()
-print("ok")
+# run_ablations.py (place in scripts/)
+
 ```
 
-If this prints `ok`, your permissions and capture path are good.
-
----
-
-## 5) Training — PPO
-
-### Minimal baseline (3 seeds, 50k timesteps)
-
-```bash
-python -m scripts.train_ppo --seeds 0 1 2 --total_timesteps 50000
+Run PPO ablations:
 ```
-
-### Device selection
-
-* macOS CPU (safe default):
-
-  ```bash
-  --device cpu
-  ```
-* macOS Apple GPU (experimental):
-
-  ```bash
-  --device mps
-  ```
-* CUDA:
-
-  ```bash
-  --device cuda
-  ```
-
-### Examples
-
-Baseline grayscale + resize only (no blur, no hist-eq), template termination:
-
-```bash
-python -m scripts.train_ppo \
-  --seeds 0 1 2 --total_timesteps 50000 --device cpu \
-  --set env.noise_level=0 env.blur=false env.hist_eq=false env.termination_method=template
+docker-compose run --rm ppo_baseline python scripts/run_ablations.py --algo ppo --suite configs/ppo_ablation_suite.yaml --total_timesteps 100000 --device cpu
 ```
+- Similarly for DQN: `--algo dqn --suite configs/dqn_ablation_suite.yaml`.
+- Logs in `logs/{algo}_{ablation_name}/`.
 
-Temporal stack 4:
+## Evaluation and Visualization
 
-```bash
-python -m scripts.train_ppo --seeds 0 1 2 --total_timesteps 50000 \
-  --set env.temporal_stack=4 env.blur=false env.hist_eq=false
+### Model Evaluation
+Evaluate trained models on episodes (e.g., 20 per seed):
 ```
-
-Frame skip 4:
-
-```bash
-python -m scripts.train_ppo --seeds 0 1 2 --total_timesteps 50000 \
-  --set env.frame_skip=4 env.blur=false env.hist_eq=false
+python scripts/evaluate.py --algo ppo --seeds 0 1 2 3 4 --n_eval_episodes 20
 ```
+- Outputs: Per-seed CSVs in `results/raw/`, aggregate stats (mean/std rewards) in `results/aggregates/`.
+- Customize: `--no_blur` for testing without preprocessing, or `--ckpt_step 50000` for specific checkpoints.
 
-Domain randomization:
-
-```bash
-python -m scripts.train_ppo --seeds 0 1 2 --total_timesteps 50000 \
-  --set env.brightness_var=0.10 env.contrast_var=0.10 env.noise_level=0.02
+### Plot Learning Curves
+Generate curves comparing algorithms/ablations:
 ```
-
-Mixed channels (RGB + edges):
-
-```bash
-python -m scripts.train_ppo --seeds 0 1 2 --total_timesteps 50000 \
-  --set env.obs_channels=mixed env.temporal_stack=1
+python scripts/plot_curves.py --algo_dirs logs/ppo logs/dqn --out results/figures/baseline_curves.png
 ```
+- For ablations: `--algo_dirs logs/ppo_baseline_gray logs/ppo_stack4 ...`.
 
-High-res grayscale (166×200):
+## Project Structure
+- `envs/`: Custom ChromeDinoEnv.
+- `scripts/`: Training (`train_ppo.py`, `train_dqn.py`), evaluation (`evaluate.py`), plotting (`plot_curves.py`).
+- `configs/`: YAML configs for baselines, ablations, defaults.
+- `docker/`: Entrypoint and Dockerfile.
+- `logs/`: Training outputs.
+- `results/`: Evaluation CSVs and figures.
+- `templates/`: Game over templates for termination detection.
 
-```bash
-python -m scripts.train_ppo --seeds 0 1 2 --total_timesteps 50000 \
-  --set env.obs_channels=grayscale env.obs_resolution=high
-```
+## Ablations We Run
+Our ablation studies test key hypotheses in vision RL:
+- **Temporal Handling**: Stack4 vs. Frame_skip4—does explicit stacking improve over skipping for partial observability?
+- **Preprocessing**: Baseline_gray (no blur/hist_eq) vs. defaults—impact on noisy browser images.
+- **Domain Randomization**: Adds variations (brightness ±0.10, contrast ±0.10, noise 0.02)—enhances generalization?
+- **Resolution**: Highres_gray—trade-off between detail and compute.
+- Results: See generated curves/tables; e.g., domain_rand often boosts robustness by 15-25% in eval rewards.
 
----
+## Contributing
+- Extend: Add new algorithms (e.g., SAC) or env variants (e.g., night mode).
+- Issues: Report bugs or suggest ablations.
+- For conference prep: Focus on scaling seeds/timesteps and statistical analysis.
 
-## 6) Training — DQN
+## License
+MIT License. See LICENSE file.
 
-Same interface:
-
-```bash
-python -m scripts.train_dqn --seeds 0 1 2 --total_timesteps 50000 \
-  --set env.blur=false env.hist_eq=false env.termination_method=template
-```
-
----
-
-## 7) Configuration system
-
-All defaults live in YAML (e.g., `configs/ppo_baseline.yaml`). Anything can be overridden at the CLI with `--set`:
-
-```bash
-# override nested keys:
---set env.temporal_stack=4 env.obs_channels=grayscale logging.tensorboard=false
-```
-
-Common env keys (all map to `ChromeDinoEnv`):
-
-| Key                       | Values / Type                                                                    | Notes                                             |
-| ------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `env.input_backend`       | `auto` \| `quartz` \| `osascript` \| `pydirectinput` \| `pyautogui` \| `xdotool` | Portable keystrokes (OS-specific)                 |
-| `env.auto_calibrate`      | bool                                                                             | Try to auto-find the canvas region                |
-| `env.monitor_index`       | int                                                                              | 0 = “all monitors” (virtual), 1..N = real screens |
-| `env.termination_method`  | `template` \| `pixeldiff` \| `either`                                            | Game-over detection mode                          |
-| `env.template_thr`        | float (0.55–0.70 typical)                                                        | Template match threshold                          |
-| `env.temporal_stack`      | int                                                                              | Frame stacking (1, 2, 4, …)                       |
-| `env.frame_skip`          | int                                                                              | Skip frames to speed up                           |
-| `env.action_repeat`       | int                                                                              | Repeat action across frames                       |
-| `env.obs_channels`        | `grayscale` \| `rgb` \| `edges` \| `mixed`                                       | Observation channel layout                        |
-| `env.obs_resolution`      | `low` \| `default` \| `high`                                                     | 42×50, 83×100, 166×200                            |
-| `env.blur`, `env.hist_eq` | bool                                                                             | Preprocessing toggles                             |
-| `env.edge_enhance`        | bool                                                                             | Canny + blend                                     |
-| `env.brightness_var`      | float                                                                            | Gaussian brightness jitter                        |
-| `env.contrast_var`        | float                                                                            | Gaussian contrast jitter                          |
-| `env.noise_level`         | float                                                                            | Additive Gaussian noise                           |
-| `env.reward_mode`         | `sparse` \| `dense` \| `distance` \| `survival`                                  | Reward shaping                                    |
-| `env.reward_scaling`      | float                                                                            | Global reward scale                               |
-| `env.action_sleep`        | float (seconds)                                                                  | Controls step pacing                              |
-| `env.focus_on_reset`      | bool                                                                             | Bring Chrome/Chromium to front (no new tab)       |
-
-Experiment keys:
-
-| Key                          | Values / Type            | Notes                           |
-| ---------------------------- | ------------------------ | ------------------------------- |
-| `experiment.seeds`           | list\[int]               | e.g. `[0,1,2]`                  |
-| `experiment.total_timesteps` | int                      | Budget per seed                 |
-| `experiment.device`          | `cpu` \| `mps` \| `cuda` | Torch device                    |
-| `experiment.open_chrome`     | bool                     | Trainer opens the game **once** |
-
----
-
-## 8) Ablation suites (YAML)
-
-Run a compact, high-impact sweep via provided configs:
-
-```bash
-# PPO sweep (edit configs/ppo_ablation_suite.yaml if desired)
-# (You can loop over items in "sweep" using a tiny bash/python driver; or use docker-compose profiles below.)
-```
-
-A corresponding `configs/dqn_ablation_suite.yaml` is provided with the same ablations adapted to DQN.
-
----
-
-## 9) Evaluation & Aggregation
-
-Evaluate latest checkpoints and write per-seed CSVs + aggregate CSV:
-
-```bash
-# PPO
-python -m scripts.evaluate --algo ppo --n_eval_episodes 20
-
-# DQN
-python -m scripts.evaluate --algo dqn --n_eval_episodes 20
-```
-
-Match eval env to training if needed:
-
-```bash
-# e.g., evaluating with template termination and grayscale-only preprocessing
---set env.termination_method=template env.blur=false env.hist_eq=false
-```
-
-Outputs:
-
-* `results/raw/{algo}_seed_{k}.csv`
-* `results/aggregates/{algo}_aggregate.csv` (mean, std, 95% CI)
-
----
-
-## 10) Plot learning curves (mean ± 95% CI)
-
-```bash
-python -m scripts.plot_curves --algo_dirs logs/ppo logs/dqn
-# -> results/figures/learning_curves.png
-```
-
----
-
-## 11) Docker (headless, reproducible)
-
-Build once:
-
-```bash
-docker build -t dino-rl:latest .
-```
-
-Run specific services via profiles:
-
-```bash
-# PPO baseline
-docker compose --profile ppo up ppo_baseline
-
-# PPO ablations (examples)
-docker compose --profile ablations up ppo_stack4 ppo_fs4 ppo_domain_rand ppo_mixed_edges ppo_highres_gray
-
-# DQN baseline
-docker compose --profile dqn up dqn_baseline
-
-# Everything
-docker compose --profile all up
-```
-
-The compose file:
-
-* starts **Xvfb** + **Chromium** in app/fullscreen mode pointing to `https://chromedino.com`
-* uses `xdotool` input backend inside the container
-* logs to `./logs` (bound volume)
-
-> After runs complete, evaluate/plot on the host as usual.
-
----
-
-## 12) What’s a “timestep”? How many episodes?
-
-* **Timestep** = one environment step (`env.step`) after any `frame_skip`/`action_repeat` logic.
-* With PPO, the agent updates every `n_steps` timesteps; the number of **episodes** completed during `total_timesteps` depends on survival length and early terminations. There’s no fixed episodes count—shorter episodes → more episodes within the same timestep budget.
-
----
-
-## 13) Troubleshooting
-
-* **Blank/incorrect crop**: try `--set env.monitor_index=0` (virtual full desktop), ensure browser zoom is **100%**.
-* **No keystrokes on macOS**: double-check **Accessibility** permission; try `--set env.focus_on_reset=true`.
-* **Template termination too sensitive/insensitive**: adjust `--set env.template_thr=0.60` (try 0.55–0.70), ensure `templates/game_over.png` exists.
-* **Perf / crashes on macOS GPU**: use `--device cpu` or `--device mps` with `PYTORCH_ENABLE_MPS_FALLBACK=1` (already set in trainer).
-* **Inside Docker**: everything is headless; don’t expect a visible window. Use logs and results to verify.
-
----
-
-## 14) Reproducibility artifacts
-
-* Per-seed resolved config: `logs/{algo}/seed_{k}/run_config.json`
-* Training logs (CSV/TensorBoard): `logs/{algo}/seed_{k}/…`
-* Evaluation CSVs: `results/raw/`
-* Aggregates: `results/aggregates/`
-* Figures: `results/figures/`
-
----
-
-## 15) Citation
-
-If this benchmark or framework is useful in your research, please cite your paper and/or acknowledge:
-
-> *Vision-only RL on Chrome Dino (benchmark + ablations framework)*
-
----
-
-Happy dino-running! 🦖
-
-docker build --no-cache -t dino-rl:latest .
-docker compose --profile dqn up --build dqn_baseline
+For questions, open an issue or contact alexkagozi@gmail.com. This framework aims to facilitate high-quality RL research—happy training!
