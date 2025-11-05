@@ -78,12 +78,7 @@ Ablation suites (`ppo_ablation_suite.yaml`, `dqn_ablation_suite.yaml`) define sw
 - **domain_rand**: Adds brightness/contrast variation and noise for robustness.
 - **highres_gray**: Higher resolution observations.
 
-Use the provided wrapper script `run_ablations.py` (create it as suggested in the conversation history or copy below):
-
-```python
-# run_ablations.py (place in scripts/)
-
-```
+Use the provided wrapper script `run_ablations.py`:
 
 Run PPO ablations:
 ```
